@@ -155,21 +155,25 @@ def pick_check_targets(items):
 
 
 def check_one(item):
+    """抽检首集。只有「拿到响应但不是 m3u8」才记 fail；
+    连接超时 / DNS 失败这类（Actions 海外 IP 常见）记 unknown，免得把好线路标死。"""
     url = item["episodes"][0]["url"]
     host = urlparse(url).netloc
+    got_response = False
     for headers in (
         {"User-Agent": UA, "Range": "bytes=0-511"},
         {"User-Agent": UA, "Range": "bytes=0-511", "Referer": f"https://{host}/"},
     ):
         try:
             r = requests.get(url, headers=headers, timeout=CHECK_TIMEOUT, stream=True)
+            got_response = True
             chunk = next(r.iter_content(512), b"") or b""
             r.close()
             if b"#EXTM3U" in chunk:
                 return "ok"
         except Exception:
             continue
-    return "fail"
+    return "fail" if got_response else "unknown"
 
 
 def main():
