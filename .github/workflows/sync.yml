@@ -35,6 +35,8 @@ jobs:
         env:
           WINDOW_HOURS: ${{ github.event.inputs.window_hours || '24' }}
           RETENTION_DAYS: '14'
+          # 抽检拿的是 Actions 的海外 IP，探国内 CDN 会大面积假阴性，默认关掉；想开就改回 100
+          CHECK_SAMPLE_MAX: '0'
           PYTHONIOENCODING: utf-8
         run: python sync_movies.py
 
