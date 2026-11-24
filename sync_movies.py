@@ -261,6 +261,43 @@ def main():
     log(f"[merge] 标题+年份 二次合并：{merged_count_before} -> {len(merged)}")
 
     items = list(merged.values())
+
+    # 滚动累积：把上一版 latest.json 里还留有价值的条目并回来。
+    # 每次只抓 WINDOW_HOURS 的新片，但老片不该从片库里消失（否则每天只剩最近 24h 的几十条）。
+    RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS") or "14")
+    now_ms0 = int(time.time() * 1000)
+    keep_until = now_ms0 - RETENTION_DAYS * 86400 * 1000
+    if os.path.exists(OUT_FILE):
+        try:
+            with open(OUT_FILE, encoding="utf-8") as f:
+                old_payload = json.load(f)
+            old_items = old_payload.get("items") or []
+        except Exception:
+            old_items = []
+        index = {it.get("uniq_key"): it for it in items}
+        carried = 0
+        for oi in old_items:
+            key = oi.get("uniq_key")
+            if not key:
+                continue
+            slot = index.get(key)
+            if slot is None:
+                last_seen = int(oi.get("last_seen") or now_ms0)
+                if last_seen >= keep_until:
+                    oi["last_seen"] = last_seen
+                    index[key] = oi
+                    carried += 1
+                continue
+            # 同一条片子：新抓的线路覆盖旧线路，旧线路里的其它站保留
+            known = {l["source_key"] for l in slot["lines"]}
+            for line in oi.get("lines") or []:
+                if line.get("source_key") not in known:
+                    slot["lines"].append(line)
+        for it in index.values():
+            it["last_seen"] = now_ms0
+        items = list(index.values())
+        log(f"[carry] 承接旧片库 {carried} 条（保留 {RETENTION_DAYS} 天），合并后 {len(items)} 条")
+
     # 抽检第一批线路
     flat = [(item, line) for item in items for line in item["lines"] if not line["checked_at"]]
     targets = flat[: min(CHECK_SAMPLE_MAX, max(1, int(len(flat) * CHECK_SAMPLE_RATIO)))]
