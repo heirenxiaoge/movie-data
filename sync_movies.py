@@ -267,6 +267,8 @@ def main():
     RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS") or "14")
     now_ms0 = int(time.time() * 1000)
     keep_until = now_ms0 - RETENTION_DAYS * 86400 * 1000
+    # 停用某个源以后，旧片库里它的线路不能又被 carry 带回来（否则 chip 上会一直躺着死线路）
+    src_keys = {s["key"] for s in sources}
     if os.path.exists(OUT_FILE):
         try:
             with open(OUT_FILE, encoding="utf-8") as f:
@@ -284,14 +286,17 @@ def main():
             if slot is None:
                 last_seen = int(oi.get("last_seen") or now_ms0)
                 if last_seen >= keep_until:
+                    oi["lines"] = [l for l in (oi.get("lines") or []) if l.get("source_key") in src_keys]
+                    if not oi["lines"]:
+                        continue
                     oi["last_seen"] = last_seen
                     index[key] = oi
                     carried += 1
                 continue
-            # 同一条片子：新抓的线路覆盖旧线路，旧线路里的其它站保留
+            # 同一条片子：新抓的线路覆盖旧线路，旧线路里的其它站保留（只保留还启用的站）
             known = {l["source_key"] for l in slot["lines"]}
             for line in oi.get("lines") or []:
-                if line.get("source_key") not in known:
+                if line.get("source_key") not in known and line.get("source_key") in src_keys:
                     slot["lines"].append(line)
         for it in index.values():
             it["last_seen"] = now_ms0
