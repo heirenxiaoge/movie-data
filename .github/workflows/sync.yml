@@ -34,6 +34,8 @@ jobs:
       - name: Run sync script
         env:
           WINDOW_HOURS: ${{ github.event.inputs.window_hours || '24' }}
+          RETENTION_DAYS: '14'
+          PYTHONIOENCODING: utf-8
         run: python sync_movies.py
 
       - name: Show stats
