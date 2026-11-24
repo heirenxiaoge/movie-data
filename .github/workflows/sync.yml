@@ -1,0 +1,61 @@
+name: Sync Movies
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Pull last N hours (first run: 168)'
+        required: false
+        default: '24'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-movies
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync script
+        env:
+          WINDOW_HOURS: ${{ github.event.inputs.window_hours || '24' }}
+        run: python sync_movies.py
+
+      - name: Show stats
+        if: always()
+        run: python -c "import json,os;p='latest.json';d=json.load(open(p,encoding='utf-8')) if os.path.exists(p) else {};print('[stats]',json.dumps(d.get('stats',{}),ensure_ascii=False));print('[count]',d.get('count'))"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add latest.json
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "no changes"
+          else
+            git commit -m "update latest.json [skip ci]"
+            git push
+          fi
+
+      - name: Fail loudly when nothing fetched
+        if: always()
+        run: |
+          test -f latest.json || { echo "::error::latest.json not generated"; exit 1; }
+          COUNT=$(python -c "import json;print(json.load(open('latest.json',encoding='utf-8')).get('count',0))")
+          echo "count=$COUNT"
+          test "$COUNT" -gt 0 || { echo "::error::count is 0, check sources"; exit 1; }
