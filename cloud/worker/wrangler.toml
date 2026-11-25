@@ -1,0 +1,19 @@
+name = "nplike-catalog"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# 首次部署：
+#   wrangler d1 create nplike           # 拿到 database_id 填到下面
+#   wrangler d1 execute nplike --remote --file=../schema.sql
+#   wrangler secret put APP_KEY          # App 里用同一个口令
+#   wrangler deploy
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nplike"
+database_id = "a33bf158-a973-4607-a57f-10bf36129758"
+
+[vars]
+# 单页上限，App 传的 size 会被夹到这个范围内
+MAX_PAGE_SIZE = "48"
