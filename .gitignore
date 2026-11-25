@@ -1,0 +1,9 @@
+# python
+__pycache__/
+*.pyc
+cloud/__pycache__/
+cloud/out/
+# node
+node_modules/
+worker/.wrangler/
+.wrangler/
