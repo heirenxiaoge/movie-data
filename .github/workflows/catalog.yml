@@ -1,0 +1,84 @@
+name: catalog-sync
+
+# 每天 18:30 UTC（北京时间 02:30）拉一次增量，匹配后 upsert 进 D1。
+# 只跑增量：fetch.py 内部走 L1(ac=detail&h) → L2(ac=list&h 取 id 再 ac=detail&ids) → L3(vod_id 水位线)。
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+    inputs:
+      window:
+        description: "增量时间窗（小时）"
+        required: false
+        default: "30"
+      full:
+        description: "忽略水位线，按窗口重新全量扫一遍（首轮灌库用）"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: cloud/requirements.txt
+
+      - name: Install deps
+        run: pip install -r cloud/requirements.txt
+
+      - name: Fetch increments
+        working-directory: cloud
+        env:
+          WINDOW: ${{ github.event.inputs.window || '30' }}
+          FULL: ${{ github.event.inputs.full || 'false' }}
+        run: |
+          ARGS="--window $WINDOW"
+          if [ "$FULL" = "true" ]; then ARGS="$ARGS --full"; fi
+          python fetch.py $ARGS
+
+      - name: Match & emit SQL
+        working-directory: cloud
+        run: python match.py
+
+      - name: Show stats
+        working-directory: cloud
+        run: |
+          python - <<'PY'
+          import json, os
+          raw = json.load(open("out/raw.json", encoding="utf-8"))
+          sql = open("out/upsert.sql", encoding="utf-8")
+          stmts = sum(1 for line in sql if line.startswith("INSERT INTO"))
+          print(f"raw items: {len(raw['items'])}, upsert statements: {stmts}")
+          print("SQL size:", os.path.getsize("out/upsert.sql"), "bytes")
+          PY
+
+      - name: Apply to D1
+        working-directory: cloud/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 d1 execute nplike \
+            --remote --yes --file=../out/upsert.sql
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-out
+          path: |
+            cloud/out/upsert.sql
+            cloud/out/pending.jsonl
+          if-no-files-found: warn
+          retention-days: 7
